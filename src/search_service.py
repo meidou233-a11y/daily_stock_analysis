@@ -269,8 +269,10 @@ class SearchResponse:
     
     def to_context(self, max_results: int = 5) -> str:
         """将搜索结果转换为可用于 AI 分析的上下文"""
-        if not self.success or not self.results:
-            return f"搜索 '{self.query}' 未找到相关结果。"
+        if not self.success:
+            return f"搜索 '{self.query}' 失败，相关信息尚未验证。"
+        if not self.results:
+            return f"搜索 '{self.query}' 未返回可用结果。"
         
         lines = [f"【{self.query} 搜索结果】（来源：{self.provider}）"]
         for i, result in enumerate(self.results[:max_results], 1):
@@ -296,6 +298,7 @@ class BaseSearchProvider(ABC):
         self._key_usage: Dict[str, int] = {key: 0 for key in api_keys}
         self._key_errors: Dict[str, int] = {key: 0 for key in api_keys}
         self._state_lock = threading.RLock()
+        self._disabled_keys: set[str] = set()
     
     @property
     def name(self) -> str:
@@ -304,7 +307,8 @@ class BaseSearchProvider(ABC):
     @property
     def is_available(self) -> bool:
         """检查是否有可用的 API Key"""
-        return bool(self._api_keys)
+        with self._state_lock:
+            return any(key not in self._disabled_keys for key in self._api_keys)
     
     def _get_next_key(self) -> Optional[str]:
         """
@@ -320,13 +324,16 @@ class BaseSearchProvider(ABC):
             for _ in range(len(self._api_keys)):
                 key = next(self._key_cycle)
                 # 跳过错误次数过多的 key（超过 3 次）
-                if self._key_errors.get(key, 0) < 3:
+                if key not in self._disabled_keys and self._key_errors.get(key, 0) < 3:
                     return key
             
-            # 所有 key 都有问题，重置错误计数并返回第一个
+            enabled_keys = [key for key in self._api_keys if key not in self._disabled_keys]
+            if not enabled_keys:
+                return None
+            # 临时错误允许重试；认证或欠费错误只在新运行中重新探测。
             logger.warning(f"[{self._name}] 所有 API Key 都有错误记录，重置错误计数")
             self._key_errors = {key: 0 for key in self._api_keys}
-            return self._api_keys[0] if self._api_keys else None
+            return enabled_keys[0]
     
     def _record_success(self, key: str) -> None:
         """记录成功使用"""
@@ -341,7 +348,7 @@ class BaseSearchProvider(ABC):
         with self._state_lock:
             self._key_errors[key] = self._key_errors.get(key, 0) + 1
             error_count = self._key_errors[key]
-        logger.warning(f"[{self._name}] API Key {key[:8]}... 错误计数: {error_count}")
+        logger.warning(f"[{self._name}] API Key 错误计数: {error_count}")
     
     @abstractmethod
     def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7) -> SearchResponse:
@@ -365,7 +372,7 @@ class BaseSearchProvider(ABC):
                 results=[],
                 provider=self._name,
                 success=False,
-                error_message=f"{self._name} 未配置 API Key"
+                error_message=f"{self._name} 暂无可用 API Key（未配置、认证失败或额度不足）"
             )
 
         start_time = time.time()
@@ -517,7 +524,7 @@ class TavilySearchProvider(BaseSearchProvider):
                 results=[],
                 provider=self._name,
                 success=False,
-                error_message=f"{self._name} 未配置 API Key"
+                error_message=f"{self._name} 暂无可用 API Key（未配置、认证失败或额度不足）"
             )
 
         start_time = time.time()
@@ -1210,6 +1217,17 @@ class AnspireSearchProvider(BaseSearchProvider):
     def __init__(self, api_keys: List[str]):
         super().__init__(api_keys, "Anspire")
     
+    def _disable_terminal_key(self, api_key: str, status: int, message: str) -> None:
+        lower = message.lower()
+        quota_error = any(token in lower for token in (
+            "余额不足", "额度不足", "免费额度: 0", "insufficient balance", "credits depleted",
+        ))
+        if status not in (401, 402) and not quota_error:
+            return
+        with self._state_lock:
+            self._disabled_keys.add(api_key)
+        logger.warning("[Anspire] 认证或额度不可用，本次运行停用该 Key 并尝试备用搜索服务")
+
     def _do_search(self, query: str, api_key: str, max_results: int, days: int = 7, region_mode: int = 2) -> SearchResponse:
         """执行 Anspire 搜索"""
         try:
@@ -1266,6 +1284,7 @@ class AnspireSearchProvider(BaseSearchProvider):
                 else:
                     error_msg = f"HTTP {response.status_code}: {error_message}"
                 
+                self._disable_terminal_key(api_key, response.status_code, error_msg)
                 logger.warning(f"[Anspire] 搜索失败：{error_msg}")
                 
                 return SearchResponse(
@@ -1292,6 +1311,7 @@ class AnspireSearchProvider(BaseSearchProvider):
             
             if 'code' in data and data.get('code') != 200:
                 error_msg = data.get('msg') or f"API 返回错误码：{data.get('code')}"
+                self._disable_terminal_key(api_key, 200, str(error_msg))
                 logger.warning(f"[Anspire] 搜索失败：{error_msg}")
                 return SearchResponse(
                     query=query,
@@ -4553,19 +4573,33 @@ class SearchService:
                 request_days,
             )
 
-            if isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic'):
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
-                    topic=dim['tavily_topic'],
-                )
-            else:
-                response = provider.search(
-                    dim['query'],
-                    max_results=provider_max_results,
-                    days=request_days,
-                )
+            ordered_providers = (
+                available_providers[(provider_index - 1) % len(available_providers):]
+                + available_providers[:(provider_index - 1) % len(available_providers)]
+            )
+            response = SearchResponse(
+                query=dim['query'], results=[], provider="None",
+                success=False, error_message="所有搜索服务不可用",
+            )
+            for provider in ordered_providers:
+                if not provider.is_available:
+                    continue
+                try:
+                    kwargs = {"topic": dim['tavily_topic']} if (
+                        isinstance(provider, TavilySearchProvider) and dim.get('tavily_topic')
+                    ) else {}
+                    response = provider.search(
+                        dim['query'], max_results=provider_max_results, days=request_days, **kwargs,
+                    )
+                except Exception as exc:
+                    response = SearchResponse(
+                        query=dim['query'], results=[], provider=provider.name,
+                        success=False, error_message=type(exc).__name__,
+                    )
+                if response.success:
+                    break
+            if not response.success:
+                logger.warning("[情报搜索] %s: 所有可用搜索服务均失败", dim['desc'])
             if dim['strict_freshness']:
                 filtered_response = self._filter_news_response(
                     response,
@@ -4672,8 +4706,10 @@ class SearchService:
                         if r.relevance_reasons:
                             relevance_parts.append(f"依据: {'；'.join(r.relevance_reasons[:3])}")
                         lines.append(f"     关联度: {'; '.join(relevance_parts)}")
+            elif not resp.success:
+                lines.append("  检索失败，相关信息尚未验证（请检查服务额度、认证与网络）")
             else:
-                lines.append("  未找到相关信息")
+                lines.append("  检索窗口内未返回可用信息")
         
         return "\n".join(lines)
     

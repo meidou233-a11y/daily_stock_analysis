@@ -25,6 +25,7 @@ from src.config import get_config
 from src.report_language import normalize_report_language
 from src.search_service import SearchService
 from src.core.market_profile import get_profile, MarketProfile
+from src.core.trading_calendar import get_market_now
 from src.core.market_strategy import get_market_strategy_blueprint
 from src.llm.backend_registry import (
     LOCAL_CLI_GENERATION_BACKEND_IDS,
@@ -72,10 +73,12 @@ class MarketIndex:
     volume: float = 0.0          # 成交量（手）
     amount: float = 0.0          # 成交额（元）
     amplitude: float = 0.0       # 振幅(%)
+    data_date: str = ""          # 数据源标记的行情日期；空值代表未提供
     
     def to_dict(self) -> Dict[str, Any]:
         return {
             'code': self.code,
+            'data_date': self.data_date,
             'name': self.name,
             'current': self.current,
             'change': self.change,
@@ -100,6 +103,7 @@ class MarketOverview:
     limit_up_count: int = 0             # 涨停家数
     limit_down_count: int = 0           # 跌停家数
     total_amount: float = 0.0           # 两市成交额（亿元）
+    southbound_flow: Optional[Dict[str, Any]] = None
     # north_flow: float = 0.0           # 北向资金净流入（亿元）- 已废弃，接口不可用
     
     # 板块涨幅榜
@@ -556,11 +560,14 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         Returns:
             MarketOverview: 市场概览数据对象
         """
-        today = datetime.now().strftime('%Y-%m-%d')
+        today = get_market_now(self.region).date().isoformat()
         overview = MarketOverview(date=today)
         
         # 1. 获取主要指数行情（按 region 切换 A 股/美股）
         overview.indices = self._get_main_indices()
+        source_dates = [idx.data_date for idx in overview.indices if idx.data_date]
+        if source_dates:
+            overview.date = max(source_dates)
 
         # 2. 获取涨跌统计（A 股有，美股无等效数据）
         if self.profile.has_market_stats:
@@ -571,8 +578,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             self._get_sector_rankings(overview)
             self._get_concept_rankings(overview)
         
-        # 4. 获取北向资金（可选）
-        # self._get_north_flow(overview)
+        # Southbound executed net buys are separate from unavailable market-wide breadth.
+        if self.region == "hk":
+            try:
+                overview.southbound_flow = self.data_manager.get_southbound_flow(overview.date)
+            except Exception as exc:
+                logger.warning("[南向资金] 获取失败: %s", type(exc).__name__)
         
         return overview
 
@@ -601,6 +612,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                         prev_close=item['prev_close'],
                         volume=item['volume'],
                         amount=item['amount'],
+                        data_date=str(item.get('data_date') or ''),
                         amplitude=item['amplitude']
                     )
                     indices.append(index)
@@ -725,6 +737,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         Returns:
             新闻列表
         """
+        self._market_news_status = "not_configured"
         if not self.search_service:
             logger.warning(
                 "[大盘] %s action=search_market_news status=skipped reason=no_search_service",
@@ -733,6 +746,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return []
         
         all_news = []
+        successful_queries = 0
 
         # 按 region 使用不同的新闻搜索词
         search_queries = self.profile.news_queries
@@ -745,35 +759,34 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "kr": "韩国股市" if review_language == "zh" else "Korea stock market",
         }
         
-        try:
-            logger.info("[大盘] %s action=search_market_news status=start", self._log_context())
-            
-            # 根据 region 设置搜索上下文名称，避免美股搜索被解读为 A 股语境
-            market_name = market_names.get(self.region, "大盘")
-            for query in search_queries:
+        logger.info("[大盘] %s action=search_market_news status=start", self._log_context())
+        market_name = market_names.get(self.region, "大盘")
+        for query in search_queries:
+            try:
                 response = self.search_service.search_stock_news(
                     stock_code="market",
                     stock_name=market_name,
                     max_results=3,
-                    focus_keywords=query.split()
+                    focus_keywords=query.split(),
                 )
-                if response and response.results:
-                    all_news.extend(response.results)
-                    logger.info(
-                        "[大盘] %s action=search_market_news status=query_success count=%d",
-                        self._log_context(),
-                        len(response.results),
-                    )
-            
-            logger.info(
-                "[大盘] %s action=search_market_news status=success count=%d",
-                self._log_context(),
-                len(all_news),
-            )
-            
-        except Exception as e:
-            logger.error("[大盘] %s action=search_market_news status=failed error=%s", self._log_context(), e)
-        
+                if response and response.success:
+                    successful_queries += 1
+                    all_news.extend(response.results or [])
+            except Exception:
+                # Do not expose provider errors or credentials in the report/log.
+                logger.warning(
+                    "[大盘] %s action=search_market_news status=query_failed",
+                    self._log_context(),
+                )
+
+        self._market_news_status = (
+            "available" if all_news else "empty" if successful_queries else "failed"
+        )
+        logger.info(
+            "[大盘] %s action=search_market_news status=%s count=%d",
+            self._log_context(), self._market_news_status, len(all_news),
+        )
+
         return all_news
     
     def generate_market_review(self, overview: MarketOverview, news: List) -> str:
@@ -1038,6 +1051,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "date": overview.date,
             "market_scope": self._get_market_scope_name(language),
             "indices": [idx.to_dict() for idx in overview.indices],
+            "data_coverage_note": self._index_coverage_note(overview),
+            "news_search_status": getattr(self, "_market_news_status", "unknown"),
+            "southbound_flow": overview.southbound_flow,
             "sectors": {
                 "top": list(overview.top_sectors or []),
                 "bottom": list(overview.bottom_sectors or []),
@@ -1172,6 +1188,21 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 )
                 review = f"{review.rstrip()}\n\n{fallback_heading}\n{sector_block}\n"
 
+        if not news and getattr(self, "_market_news_status", "") in ("failed", "not_configured"):
+            status_block = self._build_news_block([])
+            heading = "### News Search Status" if self._get_review_language() == "en" else "### 新闻检索状态"
+            review = f"{review.rstrip()}\n\n{heading}\n{status_block}\n"
+
+        southbound_block = self._build_southbound_block(overview)
+        if southbound_block:
+            heading = "### Southbound Flow" if self._get_review_language() == "en" else "### 南向资金"
+            review = f"{review.rstrip()}\n\n{heading}\n- {southbound_block}\n"
+
+        coverage_note = self._index_coverage_note(overview)
+        if coverage_note:
+            heading = "### Data Coverage" if self._get_review_language() == "en" else "### 数据覆盖说明"
+            review = f"{review.rstrip()}\n\n{heading}\n- {coverage_note}\n"
+
         return review
 
     @staticmethod
@@ -1195,7 +1226,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     def _build_stats_block(self, overview: MarketOverview) -> str:
         """Build market statistics block."""
-        has_stats = overview.up_count or overview.down_count or overview.total_amount
+        has_stats = overview.up_count or overview.down_count or overview.flat_count or overview.total_amount
         has_market_signal = bool(self._supports_market_light() and (overview.indices or has_stats))
         if not has_stats and not has_market_signal:
             return ""
@@ -1300,6 +1331,32 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         )
         return snapshot.model_dump()
 
+    @staticmethod
+    def _equity_index_changes(overview: MarketOverview) -> List[float]:
+        return [
+            idx.change_pct for idx in overview.indices
+            if idx.code.upper() != "VIX" and idx.change_pct is not None
+            and (not idx.data_date or idx.data_date == overview.date)
+        ]
+
+    def _index_coverage_note(self, overview: MarketOverview) -> str:
+        codes = {re.sub(r"^(sh|sz)", "", idx.code, flags=re.IGNORECASE) for idx in overview.indices}
+        expected = self.profile.expected_index_codes
+        missing = [code for code in expected if code not in codes]
+        stale = [idx.name for idx in overview.indices if idx.data_date and idx.data_date != overview.date]
+        if not missing and not stale:
+            return ""
+        if self._get_review_language() == "en":
+            return (
+                f"Index coverage is partial; missing: {', '.join(missing) or '-'}; "
+                f"different data dates: {', '.join(stale) or '-'}. "
+                "Do not claim alignment across all major indices."
+            )
+        return (
+            f"指数覆盖不完整；缺失：{', '.join(missing) or '无'}；"
+            f"行情日期不同：{', '.join(stale) or '无'}。不得据此断言主要指数全面共振。"
+        )
+
     def _build_market_light_reasons_zh(self, overview: MarketOverview, score: int) -> List[str]:
         participation = overview.up_count + overview.down_count
         up_ratio = overview.up_count / participation if participation else None
@@ -1311,7 +1368,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 reasons.append(f"上涨家数占比 {up_ratio:.0%}，亏钱效应较强")
             else:
                 reasons.append(f"上涨家数占比 {up_ratio:.0%}，市场分化")
-        index_changes = [idx.change_pct for idx in overview.indices if idx.change_pct is not None]
+        index_changes = self._equity_index_changes(overview)
         if index_changes:
             avg_change = sum(index_changes) / len(index_changes)
             reasons.append(f"主要指数平均涨跌幅 {avg_change:+.2f}%")
@@ -1334,7 +1391,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 reasons.append(f"advancers ratio {up_ratio:.0%}, downside pressure dominates")
             else:
                 reasons.append(f"advancers ratio {up_ratio:.0%}, breadth is mixed")
-        index_changes = [idx.change_pct for idx in overview.indices if idx.change_pct is not None]
+        index_changes = self._equity_index_changes(overview)
         if index_changes:
             avg_change = sum(index_changes) / len(index_changes)
             reasons.append(f"average major-index change {avg_change:+.2f}%")
@@ -1410,10 +1467,51 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             append_ranking("#### 概念板块领跌 Top 5", "概念板块", overview.bottom_concepts)
         return "\n".join(lines)
 
+    def _get_empty_news_text(self, language: str | None = None) -> str:
+        """Distinguish unavailable search from a successful search with no usable hits."""
+        language = language or self._get_review_language()
+        status = getattr(self, "_market_news_status", "empty")
+        if status == "not_configured":
+            return (
+                "News search is not configured; news catalysts cannot be verified."
+                if language == "en" else "未配置新闻搜索服务，无法验证消息催化。"
+            )
+        if status == "failed":
+            return (
+                "News search failed; check provider quota, credentials and connectivity. "
+                "This does not mean there was no market news."
+                if language == "en" else
+                "新闻检索失败，请检查搜索服务额度、认证与网络；这不代表市场没有相关新闻。"
+            )
+        return (
+            "No usable news was returned within the search window."
+            if language == "en" else "检索窗口内未返回可用新闻。"
+        )
+
+    def _build_southbound_block(self, overview: MarketOverview) -> str:
+        if self.region != "hk":
+            return ""
+        flow = overview.southbound_flow
+        language = self._get_review_language()
+        if not flow:
+            return (
+                "Southbound net executed buys: unavailable for this quote date."
+                if language == "en" else "南向成交净买额：该行情日期暂无可用数据。"
+            )
+        value = flow["net_buy"]
+        return (
+            f"Southbound net executed buys: {value:+.2f} (HKD 100m), "
+            f"date: {flow['data_date']}, source: {flow['source']}. "
+            "This is not quota-derived inflow or market-wide turnover."
+            if language == "en" else
+            f"南向成交净买额：{value:+.2f} 亿港元；日期：{flow['data_date']}；来源：{flow['source']}。"
+            "此项不是额度推算的资金净流入，也不是港股全市场成交额。"
+        )
+
     def _build_news_block(self, news: List) -> str:
         """Build a compact source-aware news catalyst list for the rendered report."""
         if not news:
-            return ""
+            return "- " + self._get_empty_news_text()
         language = self._get_review_language()
         if language == "en":
             lines = [
@@ -1501,7 +1599,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if total_amount >= 9000:
             return "中等活跃"
         if total_amount > 0:
-            return "缩量观望"
+            return "低活跃度（不能据此判断缩量）"
         return "暂无数据"
 
     def _build_market_light_scores(self, overview: MarketOverview) -> Dict[str, Any]:
@@ -1513,7 +1611,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if breadth_available:
             breadth_score = int(overview.up_count / participants * 100)
 
-        index_changes = [idx.change_pct for idx in overview.indices if idx.change_pct is not None]
+        index_changes = self._equity_index_changes(overview)
         index_available = bool(overview.indices and index_changes)
         index_score = 50
         if index_available:
@@ -1703,7 +1801,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
             data_limit_lines = []
             if not self.profile.has_market_stats:
                 data_limit_lines.append(
-                    "- Market breadth, aggregate turnover, participation, and fund-flow signals are not available for this market."
+                    "- Market breadth, aggregate turnover, participation, are not available for this market."
                 )
             if not self.profile.has_sector_rankings:
                 data_limit_lines.append("- Sector/theme ranking data is not available for this market.")
@@ -1725,11 +1823,44 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
 
             data_limit_lines = []
             if not self.profile.has_market_stats:
-                data_limit_lines.append("- 该市场暂无涨跌家数、涨跌停、成交额汇总、参与度或资金流信号。")
+                data_limit_lines.append("- 该市场暂无涨跌家数、涨跌停、成交额汇总或全市场参与度数据。")
             if not self.profile.has_sector_rankings:
                 data_limit_lines.append("- 该市场暂无行业板块/概念题材涨跌榜。")
             if data_limit_lines:
                 data_limits_block = "## 数据边界\n" + "\n".join(data_limit_lines)
+
+        if self.profile.has_market_stats and not (
+            overview.up_count or overview.down_count or overview.flat_count or overview.total_amount
+        ):
+            stats_block = (
+                "## Market Breadth\nBreadth, limit counts and aggregate turnover are unavailable "
+                "because collection returned no usable data; missing values are not zero."
+                if review_language == "en" else
+                "## 市场概况\n涨跌家数、涨跌停及成交额汇总采集未返回可用数据；缺失值不是 0。"
+            )
+            data_limits_block += (
+                "\n- Do not infer breadth or volume expansion from indices alone."
+                if review_language == "en" else
+                "\n- 不得仅凭指数判断上涨广度或放量程度。"
+            )
+
+        southbound_block = self._build_southbound_block(overview)
+        if southbound_block:
+            stats_block += "\n\n" + southbound_block
+
+        coverage_note = self._index_coverage_note(overview)
+        if coverage_note:
+            data_limits_block += "\n- " + coverage_note
+        if self.region == "us":
+            data_limits_block += (
+                "\n- VIX is a volatility gauge; its rise is not an equity-market gain."
+                if review_language == "en" else
+                "\n- VIX 为波动率指标，其上涨不代表股市上涨，不参与股票指数平均涨跌幅。"
+            )
+        if any(idx.data_date for idx in overview.indices):
+            indices_text += "\n" + (
+                "Quote dates: " if review_language == "en" else "行情数据日期："
+            ) + ", ".join(f"{idx.name} {idx.data_date or 'N/A'}" for idx in overview.indices)
 
         data_no_indices_hint = (
             "注意：由于行情数据获取失败，请主要根据【市场新闻】进行定性分析和总结，不要编造具体的指数点位。"
@@ -1743,7 +1874,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
                 else ""
             )
             indices_placeholder = indices_text if indices_text else "No index data (API error)"
-            news_placeholder = news_text if news_text else "No relevant news"
+            news_placeholder = news_text if news_text else self._get_empty_news_text(review_language)
             data_boundary_requirement = (
                 "- Respect Data Limits: do not invent or over-interpret unsupported breadth, fund-flow, turnover, participation, or sector-ranking data.\n"
                 if data_limits_block
@@ -1756,7 +1887,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
             )
         else:
             indices_placeholder = indices_text if indices_text else "暂无指数数据（接口异常）"
-            news_placeholder = news_text if news_text else "暂无相关新闻"
+            news_placeholder = news_text if news_text else self._get_empty_news_text(review_language)
             data_boundary_requirement = (
                 "- 严格遵守数据边界：未提供涨跌家数、资金流、成交额汇总或板块榜时，不要编造或过度解读。\n"
                 if data_limits_block
@@ -1909,19 +2040,24 @@ Output the report content directly, no extra commentary.
                 market_mood = self._get_market_mood_text("strong_up", template_language)
             elif mood_index.change_pct > 0:
                 market_mood = self._get_market_mood_text("mild_up", template_language)
+            elif mood_index.change_pct == 0:
+                market_mood = self._get_market_mood_text("range", template_language)
             elif mood_index.change_pct > -1:
                 market_mood = self._get_market_mood_text("mild_down", template_language)
             else:
                 market_mood = self._get_market_mood_text("strong_down", template_language)
         else:
-            market_mood = self._get_market_mood_text("range", template_language)
+            market_mood = "insufficient index data" if template_language == "en" else "指数数据不足，方向待验证"
         
         # 指数行情（简洁格式）
         indices_text = ""
-        for idx in overview.indices[:4]:
+        for idx in overview.indices:
             marker = self._get_index_change_arrow(idx.change_pct)
             indices_text += f"- **{idx.name}**: {idx.current:.2f} ({marker} {idx.change_pct:+.2f}%)\n"
         
+        notes = [self._index_coverage_note(overview), self._build_southbound_block(overview)]
+        indices_text += "\n".join("- " + note for note in notes if note)
+
         # 板块信息
         separator = ", " if template_language == "en" else "、"
         top_text = separator.join([s['name'] for s in overview.top_sectors[:3]])
@@ -1963,6 +2099,9 @@ Today's {self._get_market_scope_name(template_language)} showed **{market_mood}*
 {indices_text or "- No index data available"}
 {stats_section}
 {sector_section}
+### News Catalysts
+{self._build_news_block(news)}
+
 ### 5. Risk Alerts
 Market conditions can change quickly. The data above is for reference only and does not constitute investment advice.
 
@@ -1982,6 +2121,7 @@ Market conditions can change quickly. The data above is for reference only and d
         )
         indices_block = self._build_indices_block(overview)
         sector_block = self._build_sector_block(overview) if self.profile.has_sector_rankings else ""
+        coverage_notes = "\n".join("- " + note for note in notes if note)
         summary_focus = (
             "指数承接、成交额变化和板块持续性"
             if self.profile.has_market_stats and self.profile.has_sector_rankings
@@ -2005,10 +2145,13 @@ Market conditions can change quickly. The data above is for reference only and d
             else ""
         )
         funds_section = (
-            """
+            ("""
 ### 四、资金与情绪
 - 结合成交额和涨跌家数看，当前更适合等待确认，避免仅凭单一热点追高。
-"""
+""" if overview.total_amount and (overview.up_count or overview.down_count or overview.flat_count) else """
+### 四、资金与情绪
+- 成交额或涨跌家数缺失，无法验证放量程度与市场广度，等待有效数据确认。
+""")
             if self.profile.has_market_stats
             else ""
         )
@@ -2021,11 +2164,12 @@ Market conditions can change quickly. The data above is for reference only and d
 
 ### 二、指数结构
 {indices_block or indices_text or "暂无指数数据。"}
+{coverage_notes if indices_block else ""}
 {sector_section}
 {funds_section}
 
 ### 五、消息催化
-- 暂无可用新闻时，应降低对题材持续性的确定性判断。
+{self._build_news_block(news)}
 
 {self._get_strategy_markdown_block(template_language)}
 

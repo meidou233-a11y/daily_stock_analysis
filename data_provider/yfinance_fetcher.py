@@ -321,10 +321,14 @@ class YfinanceFetcher(BaseFetcher):
         ticker = yf.Ticker(yf_code)
         # 取近两日数据以计算涨跌幅
         hist = ticker.history(period='2d')
-        if hist.empty:
+        if hist.empty or 'Close' not in hist.columns:
+            return None
+        hist = hist.dropna(subset=['Close'])
+        if len(hist) < 2:
+            logger.warning("[Yfinance] %s 历史不足两条有效记录，无法验证日涨跌幅", yf_code)
             return None
         today_row = hist.iloc[-1]
-        prev_row = hist.iloc[-2] if len(hist) > 1 else today_row
+        prev_row = hist.iloc[-2]
         price = float(today_row['Close'])
         prev_close = float(prev_row['Close'])
         change = price - prev_close
@@ -335,6 +339,7 @@ class YfinanceFetcher(BaseFetcher):
         amplitude = ((high - low) / prev_close * 100) if prev_close else 0
         return {
             'code': return_code,
+            'data_date': pd.Timestamp(hist.index[-1]).date().isoformat(),
             'name': name,
             'current': price,
             'change': change,

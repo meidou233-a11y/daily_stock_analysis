@@ -405,6 +405,10 @@ class BaseFetcher(ABC):
         """
         return None
 
+    def get_southbound_flow(self, trade_date: str) -> Optional[Dict[str, Any]]:
+        """Return same-session southbound net buy data, when supported."""
+        return None
+
     def get_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
         """
         获取板块涨跌榜
@@ -4721,6 +4725,17 @@ class DataFetcherManager:
                     logger.warning(f"[{fetcher.name}] 获取板块排行失败: {error_reason}")
 
             return [], [], source_chain, last_error
+
+    def get_southbound_flow(self, trade_date: str) -> Optional[Dict[str, Any]]:
+        """Resolve Southbound flow without making it a prerequisite for a recap."""
+        for fetcher in self._get_fetchers_snapshot():
+            try:
+                flow = fetcher.get_southbound_flow(trade_date)
+                if flow:
+                    return flow
+            except Exception as exc:
+                logger.warning("[南向资金] %s 获取失败: %s", fetcher.name, type(exc).__name__)
+        return None
 
     def get_sector_rankings(self, n: int = 5) -> Tuple[List[Dict], List[Dict]]:
         """获取板块涨跌榜（自动切换数据源）"""

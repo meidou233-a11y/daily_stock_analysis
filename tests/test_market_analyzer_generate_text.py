@@ -3119,6 +3119,69 @@ class TestAnalyzerGenerateText:
 # ---------------------------------------------------------------------------
 
 class TestMarketAnalyzerBypassFix:
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    def test_failed_news_search_is_not_reported_as_no_news(self, language):
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text()
+        ma.config.report_language = language
+        ma.search_service = MagicMock()
+        ma.search_service.search_stock_news.return_value = SimpleNamespace(
+            success=False, results=[], error_message="provider quota exhausted",
+        )
+        news = ma.search_market_news()
+        overview = MarketOverview(date="2026-10-09")
+        text = ma._get_empty_news_text()
+        assert ma._market_news_status == "failed"
+        assert text in ma._build_review_prompt(overview, news)
+        assert text in ma._build_news_block(news)
+        assert text in ma._generate_template_review(overview, news)
+        assert text in ma._inject_data_into_review("## Review", overview, news)
+        assert "provider quota exhausted" not in text
+
+    def test_news_query_exception_does_not_skip_remaining_queries(self):
+        ma = self._make_market_analyzer_with_mock_generate_text()
+        ma.search_service = MagicMock()
+        item = {"title": "市场政策发布", "url": "https://example.com/news"}
+        ma.search_service.search_stock_news.side_effect = [
+            RuntimeError("query failed"),
+            SimpleNamespace(success=True, results=[item]),
+            SimpleNamespace(success=True, results=[]),
+        ]
+        assert ma.search_market_news() == [item]
+        assert ma.search_service.search_stock_news.call_count == 3
+        assert ma._market_news_status == "available"
+
+    def test_empty_and_unconfigured_search_have_distinct_messages(self):
+        ma = self._make_market_analyzer_with_mock_generate_text()
+        ma.search_service = None
+        assert ma.search_market_news() == []
+        assert "未配置" in ma._build_news_block([])
+        ma.search_service = MagicMock()
+        ma.search_service.search_stock_news.return_value = SimpleNamespace(
+            success=True, results=[],
+        )
+        assert ma.search_market_news() == []
+        assert ma._market_news_status == "empty"
+        assert "检索窗口" in ma._build_news_block([])
+
+    @pytest.mark.parametrize("language", ["zh", "en"])
+    def test_missing_statistics_do_not_send_zero_counts_to_model(self, language):
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text()
+        ma.config.report_language = language
+        overview = MarketOverview(date="2026-10-09")
+        prompt = ma._build_review_prompt(overview, [])
+        for text in ("上涨: 0 家", "两市成交额: 0 亿元", "Advancers: 0", "Turnover: 0"):
+            assert text not in prompt
+        overview.up_count = 100
+        overview.down_count = 80
+        overview.total_amount = 12345
+        prompt = ma._build_review_prompt(overview, [])
+        assert "12345" in prompt
+        assert "100" in prompt
+
     def _make_market_analyzer_with_mock_generate_text(self, return_value="复盘报告"):
         """Return a MarketAnalyzer whose embedded Analyzer.generate_text is mocked."""
         from src.core.market_profile import CN_PROFILE
