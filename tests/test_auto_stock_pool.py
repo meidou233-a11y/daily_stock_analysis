@@ -102,3 +102,25 @@ def test_snapshot_only_style_is_not_restricted_to_daily_limit():
     candidates, warnings = screen_snapshot(snapshot, "us", {"quality_value": {"exclude_st": False}}, daily_limit=1)
     assert not warnings
     assert {row["code"] for row in candidates} == {"AAPL", "MSFT"}
+
+
+def test_us_share_class_candidates_use_internal_format_and_us_routing():
+    from src.core.trading_calendar import get_market_for_stock
+    from data_provider.yfinance_fetcher import YfinanceFetcher
+    assert canonical_code("BRK-B", "us") == "BRK.B"
+    assert canonical_code("BRK.B", "us") == "BRK.B"
+    assert canonical_code("^GSPC", "us") == ""
+    assert canonical_code("600519", "us") == ""
+    codes, added = merge_daily_pool("AAPL", "", {"us": [{"code": "BRK-B"}]})
+    assert codes == ["AAPL", "BRK.B"]
+    assert get_market_for_stock(added[0]["code"]) == "us"
+    assert YfinanceFetcher()._convert_stock_code(added[0]["code"]) == "BRK-B"
+
+
+def test_foreign_history_converts_share_class_but_preserves_hong_kong():
+    from src.services.auto_stock_pool import foreign_history
+    with mock.patch("src.services.auto_stock_pool.fetch_daily_history_yfinance") as fetch:
+        foreign_history("BRK.B", lookback_days=120)
+        fetch.assert_called_with("BRK-B", lookback_days=120)
+        foreign_history("0700.HK", lookback_days=120)
+        fetch.assert_called_with("0700.HK", lookback_days=120)
