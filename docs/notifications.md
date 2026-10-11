@@ -27,7 +27,7 @@
 
 Discord 长报告发送复用现有分片链路：单条 `content` 运行时不会超过 Discord 2000 字符限制，Webhook 与 Bot API 都会逐片发送并在片与片之间短暂等待；遇到 429 时按 Discord 返回的 `retry_after` 或 `Retry-After` 做有限重试，避免中途限流后只收到前半段报告。
 
-Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。
+Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。正文超过 30,000 UTF-8 字节时复用现有 Markdown 分段工具完整拆分，标题附 `(序号/总数)`；每个目标接收所有分段，单段失败仍尝试剩余分段与目标，仅全部分段业务成功才确认渠道成功。30,000 字节是保守传输预算，并非声明 Server酱³ 官方上限。分段会增加请求数并消耗发送额度；不会自动重试失败请求，以免重复送达。
 
 ## Minimal / Advanced 分层
 
