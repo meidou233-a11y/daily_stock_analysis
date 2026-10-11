@@ -1650,6 +1650,48 @@ class TestPushplusSender(unittest.TestCase):
 class TestServerchan3Sender(unittest.TestCase):
     """Unit tests for Serverchan3Sender."""
 
+    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
+    def test_multiple_keys_are_deduplicated_and_routed(self, mock_post):
+        mock_post.return_value = _response(200, {"code": 0})
+        sender = Serverchan3Sender(_config(
+            serverchan3_sendkey=" SCT123, sctp123ttest\nSCT123 "
+        ))
+        self.assertTrue(sender.send_to_serverchan3("hello", "title", timeout_seconds=3))
+        self.assertEqual([call.args[0] for call in mock_post.call_args_list], [
+            "https://sctapi.ftqq.com/SCT123.send",
+            "https://123.push.ft07.com/send/sctp123ttest.send",
+        ])
+        for call in mock_post.call_args_list:
+            self.assertEqual(call.kwargs["timeout"], 3)
+            self.assertEqual(call.kwargs["json"]["desp"], "hello")
+
+    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
+    def test_failure_does_not_skip_next_key_or_leak_credentials(self, mock_post):
+        mock_post.side_effect = [
+            requests.ConnectionError("https://sctapi.ftqq.com/SCTsecret.send"),
+            _response(200, {"code": 0}),
+        ]
+        sender = Serverchan3Sender(_config(serverchan3_sendkey="SCTsecret,SCTsecond"))
+        with self.assertLogs("src.notification_sender.serverchan3_sender", level="ERROR") as logs:
+            self.assertFalse(sender.send_to_serverchan3("hello"))
+        self.assertEqual(mock_post.call_count, 2)
+        self.assertNotIn("SCTsecret", "\n".join(logs.output))
+
+    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
+    def test_invalid_key_does_not_skip_next_key(self, mock_post):
+        mock_post.return_value = _response(200, {"code": 0})
+        sender = Serverchan3Sender(_config(serverchan3_sendkey="sctpinvalid,SCTsecond"))
+        self.assertFalse(sender.send_to_serverchan3("hello"))
+        mock_post.assert_called_once()
+
+    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
+    def test_http_success_requires_business_success(self, mock_post):
+        sender = Serverchan3Sender(_config(serverchan3_sendkey="SCT123"))
+        for body in ({"code": 400}, {}):
+            with self.subTest(body=body):
+                mock_post.return_value = _response(200, body)
+                self.assertFalse(sender.send_to_serverchan3("hello"))
+
     def test_send_returns_false_when_no_sendkey(self):
         cfg = _config()
         sender = Serverchan3Sender(cfg)

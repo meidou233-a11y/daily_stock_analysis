@@ -15,7 +15,7 @@
 | ntfy | 静态配置 | `NTFY_URL` | `NTFY_TOKEN`, `WEBHOOK_VERIFY_SSL` | `NTFY_URL` 必须包含 topic path，例如 `https://ntfy.sh/my-topic` |
 | Gotify | 静态配置 | `GOTIFY_URL`, `GOTIFY_TOKEN` | `WEBHOOK_VERIFY_SSL` | `GOTIFY_URL` 是 server base URL，不包含 `/message`；token 通过 `X-Gotify-Key` Header 发送 |
 | PushPlus | 静态配置 | `PUSHPLUS_TOKEN` | `PUSHPLUS_TOPIC` | `PUSHPLUS_TOPIC` 仅在 token 存在时生效 |
-| Server酱3 | 静态配置 | `SERVERCHAN3_SENDKEY` | - | 手机 App 推送 |
+| Server酱3 | 静态配置 | `SERVERCHAN3_SENDKEY` | - | 手机 App 推送，支持逗号分隔多个 SendKey |
 | 自定义 Webhook | 静态配置 | `CUSTOM_WEBHOOK_URLS` | `CUSTOM_WEBHOOK_BEARER_TOKEN`, `CUSTOM_WEBHOOK_BODY_TEMPLATE`, `WEBHOOK_VERIFY_SSL` | 支持多个 URL，逗号分隔 |
 | Discord | 静态配置 | `DISCORD_WEBHOOK_URL` 或 `DISCORD_BOT_TOKEN` + `DISCORD_MAIN_CHANNEL_ID` | `DISCORD_INTERACTIONS_PUBLIC_KEY` | Webhook 与 Bot 均可启用发送 |
 | Slack | 静态配置 | `SLACK_WEBHOOK_URL` 或 `SLACK_BOT_TOKEN` + `SLACK_CHANNEL_ID` | - | Bot 优先用于文本与图片同频道发送 |
@@ -26,6 +26,8 @@
 | Telegram 会话 | 运行时上下文 | - | - | 从来源消息上下文提取，交互式命令结果仅回到来源会话 |
 
 Discord 长报告发送复用现有分片链路：单条 `content` 运行时不会超过 Discord 2000 字符限制，Webhook 与 Bot API 都会逐片发送并在片与片之间短暂等待；遇到 429 时按 Discord 返回的 `retry_after` 或 `Retry-After` 做有限重试，避免中途限流后只收到前半段报告。
+
+Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。
 
 ## Minimal / Advanced 分层
 

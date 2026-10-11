@@ -36,6 +36,26 @@ class Serverchan3Sender:
         *,
         timeout_seconds: Optional[float] = None,
     ) -> bool:
+        """Send to every configured key; one failure does not skip other recipients."""
+        keys = list(dict.fromkeys(
+            key for key in re.split(r"[,\s]+", self._serverchan3_sendkey or "") if key
+        ))
+        if not keys:
+            logger.warning("Server酱3 SendKey 未配置，跳过推送")
+            return False
+        results = [self._send_to_serverchan3_key(
+            key, content, title, timeout_seconds=timeout_seconds,
+        ) for key in keys]
+        return all(results)
+
+    def _send_to_serverchan3_key(
+        self,
+        sendkey: str,
+        content: str,
+        title: Optional[str] = None,
+        *,
+        timeout_seconds: Optional[float] = None,
+    ) -> bool:
         """
         推送消息到 Server酱3
 
@@ -72,7 +92,6 @@ class Serverchan3Sender:
 
         try:
             # 根据 sendkey 格式构造 URL
-            sendkey = self._serverchan3_sendkey
             if sendkey.startswith('sctp'):
                 match = re.match(r'sctp(\d+)t', sendkey)
                 if match:
@@ -99,15 +118,15 @@ class Serverchan3Sender:
 
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"Server酱3 消息发送成功: {result}")
+                if result.get('code') != 0:
+                    logger.error("Server酱3 返回业务错误，未确认送达")
+                    return False
+                logger.info("Server酱3 消息发送成功")
                 return True
             else:
                 logger.error(f"Server酱3 请求失败: HTTP {response.status_code}")
-                logger.error(f"响应内容: {response.text}")
                 return False
 
         except Exception as e:
-            logger.error(f"发送 Server酱3 消息失败: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+            logger.error("发送 Server酱3 消息失败: %s", type(e).__name__)
             return False
