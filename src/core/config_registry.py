@@ -71,6 +71,14 @@ _CATEGORY_DEFINITIONS: List[Dict[str, Any]] = [
 ]
 
 WEB_SETTINGS_HIDDEN_FROM_UI = {
+    # Daily Actions stock-pool preparation; not consumed by the Web runtime.
+    "STOCK_LIST_EXTRA",
+    "AUTO_SCREEN_ENABLED",
+    "AUTO_SCREEN_MARKETS",
+    "AUTO_SCREEN_MAX_ADDITIONS",
+    "AUTO_SCREEN_MARKET_TIMEOUT",
+    "AUTO_SCREEN_UNIVERSE_LIMIT",
+    "AUTO_SCREEN_US_UNIVERSE",
     "DATABASE_PATH",
     "SQLITE_WAL_ENABLED",
     "SQLITE_BUSY_TIMEOUT_MS",
