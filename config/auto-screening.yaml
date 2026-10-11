@@ -1,0 +1,46 @@
+# All three requested styles run independently; matches are combined, not ANDed.
+# Foreign-market monetary thresholds below are in local currency (USD / HKD).
+# These are configurable discovery filters, not portfolio allocation rules.
+markets:
+  cn:
+    volume_breakout: {}
+    quality_value: {}
+    momentum_quality: {}
+  us:
+    volume_breakout:
+      exclude_st: false
+      amount_min: 10000000
+      turnover_rate_min: 0.1
+      change_pct_max: 15
+    quality_value:
+      exclude_st: false
+      amount_min: 10000000
+      market_cap_min: 1000000000
+      market_cap_max: null
+      price_min: null
+      price_max: null
+    momentum_quality:
+      exclude_st: false
+      amount_min: 10000000
+      market_cap_min: 1000000000
+      price_min: null
+      price_max: null
+  hk:
+    volume_breakout:
+      exclude_st: false
+      amount_min: 20000000
+      turnover_rate_min: 0.1
+      change_pct_max: 15
+    quality_value:
+      exclude_st: false
+      amount_min: 20000000
+      market_cap_min: 1000000000
+      market_cap_max: null
+      price_min: null
+      price_max: null
+    momentum_quality:
+      exclude_st: false
+      amount_min: 20000000
+      market_cap_min: 1000000000
+      price_min: null
+      price_max: null
