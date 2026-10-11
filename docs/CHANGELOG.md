@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 每日 Actions 支持固定追加自选及 A/港/美三市场临时候选池，合并放量突破、价值质量、趋势质量三类筛选，每日限额且不永久累积；市场失败或超时保留固定自选。
+
 - [新功能] Server酱3 支持逗号分隔的多个 SendKey 并独立发送；Actions 可通过 SERVERCHAN3_SENDKEY_EXTRA Secret 追加目标，保留原推送；失败日志不回显含密钥的 URL。
 
 - [新功能] Web/API runtime scheduler 硬超时后扫描已落库分析历史，**默认发送**部分完成通知（`DSA_TIMEOUT_PARTIAL_NOTIFY` 未设置或为 true；此前超时不推送已落库个股），并在 `last_error` 中记录 `completed/pending` 摘要；可用 `DSA_TIMEOUT_PARTIAL_NOTIFY=false` 关闭推送（Refs #2328）。

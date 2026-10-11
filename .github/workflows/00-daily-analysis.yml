@@ -401,6 +401,14 @@ jobs:
           # ==========================================
           # 避免直接写入 STOCK_LIST，保留同名 Environment variables 的 runner 环境值。
           STOCK_LIST_CONFIG: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          STOCK_LIST_EXTRA: ${{ vars.STOCK_LIST_EXTRA }}
+          AUTO_SCREEN_ENABLED: ${{ vars.AUTO_SCREEN_ENABLED || 'false' }}
+          AUTO_SCREEN_MARKETS: ${{ vars.AUTO_SCREEN_MARKETS || 'cn,hk,us' }}
+          AUTO_SCREEN_MAX_ADDITIONS: ${{ vars.AUTO_SCREEN_MAX_ADDITIONS || '5' }}
+          AUTO_SCREEN_MARKET_TIMEOUT: ${{ vars.AUTO_SCREEN_MARKET_TIMEOUT || '90' }}
+          AUTO_SCREEN_UNIVERSE_LIMIT: ${{ vars.AUTO_SCREEN_UNIVERSE_LIMIT || '50' }}
+          AUTO_SCREEN_US_UNIVERSE: ${{ vars.AUTO_SCREEN_US_UNIVERSE || 'default' }}
+          SCREENING_US_TICKERS: ${{ vars.SCREENING_US_TICKERS }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'cn' }}
           MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || secrets.MARKET_REVIEW_COLOR_SCHEME || 'green_up' }}
           
@@ -437,6 +445,10 @@ jobs:
           elif [ -z "${STOCK_LIST:-}" ]; then
             export STOCK_LIST="600519"
           fi
+
+          # 每次只更新当前进程的分析列表，不覆盖固定自选 Secret/Variable。
+          python scripts/prepare_daily_stock_pool.py --output reports/daily_stock_pool.txt
+          export STOCK_LIST="$(cat reports/daily_stock_pool.txt)"
 
           # 处理 LITELLM YAML 配置文件
           if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
