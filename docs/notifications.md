@@ -27,7 +27,7 @@
 
 Discord 长报告发送复用现有分片链路：单条 `content` 运行时不会超过 Discord 2000 字符限制，Webhook 与 Bot API 都会逐片发送并在片与片之间短暂等待；遇到 429 时按 Discord 返回的 `retry_after` 或 `Retry-After` 做有限重试，避免中途限流后只收到前半段报告。
 
-Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。正文超过 30,000 UTF-8 字节时复用现有 Markdown 分段工具完整拆分，标题附 `(序号/总数)`；每个目标接收所有分段，单段失败仍尝试剩余分段与目标，仅全部分段业务成功才确认渠道成功。30,000 字节是保守传输预算，并非声明 Server酱³ 官方上限。分段会增加请求数并消耗发送额度；不会自动重试失败请求，以免重复送达。
+Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。每个目标每张报告只发送一次，不再按长度分段。每日默认采用两条模式（`DAILY_NOTIFICATION_LAYOUT=two_part`）；该模式在执行分析时设 `REPORT_TYPE=simple`、`SINGLE_STOCK_NOTIFY=false`，以保留完整仪表盘，覆盖旧的 brief / 单股通知变量。设 `DAILY_NOTIFICATION_LAYOUT=standard` 可恢复普通渠道发送；先以 `--no-notify` 保存原报告，再统一发送“自选股仪表盘与每日智慧选股”和“大盘复盘与个股情况”。第一条保留核心结论、当日行情、作战计划，附自动候选代码/分数/命中策略和筛选降级；第二条保留大盘报告和全部个股概况。原始详报与两张通知 Markdown 均上传 artifact。此模式复用两个 Server酱 Secret，暂仅发送 Server酱，不额外启用其他渠道。超过保守单条预算 60,000 UTF-8 字节会显式失败，原文保留，不静默拆分或截断。仅补发时选择 `resend` 模式并填写原 run ID 和报告日期；不重新调用行情、选股或模型。
 
 ## Minimal / Advanced 分层
 
