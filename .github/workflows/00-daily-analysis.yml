@@ -459,7 +459,10 @@ jobs:
             [[ "$SOURCE_REPORT_DATE" =~ ^[0-9]{8}$ ]] || { echo "Invalid source report date"; exit 1; }
             gh run download "$SOURCE_REPORT_RUN_ID" --pattern 'analysis-reports-*' --dir reports-replay
             mkdir -p reports
-            cp -R reports-replay/reports/. reports/
+            # gh --pattern nests downloads under the artifact name.
+            mapfile -t REPORT_SOURCES < <(find reports-replay -type d -name reports)
+            [ "${#REPORT_SOURCES[@]}" -eq 1 ] || { echo "Expected exactly one saved reports directory"; exit 1; }
+            cp -R "${REPORT_SOURCES[0]}/." reports/
             python scripts/send_daily_notifications.py --date "$SOURCE_REPORT_DATE"
             exit $?
           fi

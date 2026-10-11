@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 历史报告补发兼容 gh 按 artifact 名称创建的下载子目录；报告目录缺失或不唯一时明确失败，避免误发。
+
 - [改进] 每日日报支持两条 Server酱推送：自选股仪表盘附智慧选股，以及大盘复盘附个股概况；取消长度分段，保留原始详报，并可从原 Actions artifact 向全部接收端补发。
 
 - [修复] Server酱长报告按 30,000 UTF-8 字节分段并标记序号，保留全文并独立发送全部目标，避免超长个股汇总单次发送失败。
