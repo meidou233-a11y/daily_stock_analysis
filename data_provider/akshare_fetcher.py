@@ -2110,6 +2110,22 @@ class AkshareFetcher(BaseFetcher):
         pre_close_col = next((c for c in ['昨收', '昨日收盘', 'pre_close','lastClose'] if c in df.columns), None)
         amount_col = next((c for c in ['成交额', '成交额', 'amount','amount'] if c in df.columns), None) 
         
+        required_columns = [code_col, name_col, close_col, pre_close_col, amount_col]
+        if any(column is None for column in required_columns):
+            logger.warning("[MarketStats] 行情字段不完整，继续数据源降级")
+            return None
+        for column in (close_col, pre_close_col, amount_col):
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        # Suspended, placeholder and non-finite rows must not poison the whole snapshot.
+        valid = (
+            np.isfinite(df[close_col]) & np.isfinite(df[pre_close_col])
+            & np.isfinite(df[amount_col]) & (df[close_col] > 0)
+            & (df[pre_close_col] > 0) & (df[amount_col] > 0)
+        )
+        df = df.loc[valid].drop_duplicates(subset=[code_col])
+        if df.empty:
+            return None
+
         limit_up_count = 0
         limit_down_count = 0
         up_count = 0
@@ -2182,6 +2198,36 @@ class AkshareFetcher(BaseFetcher):
             
         return stats
 
+    def get_southbound_flow(self, trade_date: str) -> Optional[Dict[str, Any]]:
+        """Read dated net executed buys (HKD 100m), without fetching full history."""
+        datetime.strptime(trade_date, "%Y-%m-%d")
+        self._set_random_user_agent()
+        self._enforce_rate_limit()
+        response = requests.get(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get",
+            params={
+                "reportName": "RPT_MUTUAL_DEAL_HISTORY", "columns": "TRADE_DATE,NET_DEAL_AMT",
+                "filter": f"""(MUTUAL_TYPE="006")(TRADE_DATE='{trade_date}')""",
+                "sortColumns": "TRADE_DATE", "sortTypes": "-1",
+                "pageSize": "1", "pageNumber": "1", "source": "WEB", "client": "WEB",
+            },
+            timeout=self._market_stats_call_timeout,
+        )
+        response.raise_for_status()
+        result = response.json().get("result") or {}
+        rows = result.get("data") or []
+        if len(rows) != 1 or str(rows[0].get("TRADE_DATE") or "")[:10] != trade_date:
+            logger.warning("[南向资金] 未返回 %s 的唯一有效记录，拒绝使用其他日期", trade_date)
+            return None
+        value = safe_float(rows[0].get("NET_DEAL_AMT"))
+        if value is None or not pd.notna(value) or abs(value) == float("inf"):
+            return None
+        # Same conversion as AKShare stock_hsgt_hist_em; Southbound executed amounts use HKD.
+        return {
+            "data_date": trade_date, "net_buy": value / 100, "unit": "HKD 100m",
+            "metric": "net_executed_buy", "source": "Eastmoney",
+        }
+
     def get_sector_rankings(self, n: int = 5) -> Optional[Tuple[List[Dict], List[Dict]]]:
         """
         获取行业板块涨跌榜
@@ -2216,7 +2262,10 @@ class AkshareFetcher(BaseFetcher):
             self._enforce_rate_limit()
 
             logger.info("[API调用] ak.stock_board_industry_name_em() 获取板块排行...")
-            df = ak.stock_board_industry_name_em()
+            df = _akshare_call_with_timeout(
+                ak.stock_board_industry_name_em, timeout=self._market_stats_call_timeout,
+                call_name="ak.stock_board_industry_name_em",
+            )
             if df is not None and not df.empty:
                 change_col = '涨跌幅'
                 name = '板块名称'
@@ -2231,7 +2280,10 @@ class AkshareFetcher(BaseFetcher):
             self._enforce_rate_limit()
 
             logger.info("[API调用] ak.stock_sector_spot() 获取行业板块排行(新浪)...")
-            df = ak.stock_sector_spot(indicator='行业')
+            df = _akshare_call_with_timeout(
+                ak.stock_sector_spot, indicator="行业", timeout=self._market_stats_call_timeout,
+                call_name="ak.stock_sector_spot",
+            )
             if df is None or df.empty:
                 return None
             change_col = '涨跌幅'
@@ -2251,7 +2303,10 @@ class AkshareFetcher(BaseFetcher):
             self._enforce_rate_limit()
 
             logger.info("[API调用] ak.stock_board_concept_name_em() 获取概念排行...")
-            df = ak.stock_board_concept_name_em()
+            df = _akshare_call_with_timeout(
+                ak.stock_board_concept_name_em, timeout=self._market_stats_call_timeout,
+                call_name="ak.stock_board_concept_name_em",
+            )
             if df is None or df.empty:
                 return None
 

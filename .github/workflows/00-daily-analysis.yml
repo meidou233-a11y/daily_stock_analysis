@@ -563,6 +563,7 @@ jobs:
       - name: 显示运行结果
         if: always()
         run: |
+          python scripts/analysis_health_summary.py --log-dir logs --summary-file "$GITHUB_STEP_SUMMARY"
           echo ""
           echo "=========================================="
           echo "📊 分析完成"

@@ -117,7 +117,7 @@ class FeishuSender:
             self._feishu_receive_id_type = "chat_id"
         # domain_name must be "feishu" or "lark"; anything else defaulted to feishu.
         raw_domain = (
-            getattr(config, "feishu_domain", None) or os.getenv("FEISHU_DOMAIN", "feishu")
+            getattr(config, "feishu_domain", None) or os.getenv("FEISHU_DOMAIN") or "feishu"
         ).strip().lower()
         if raw_domain not in ("feishu", "lark"):
             logger.warning(

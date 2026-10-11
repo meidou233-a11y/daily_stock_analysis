@@ -6,7 +6,7 @@
 供 MarketAnalyzer 按 region 切换 A 股/港股/美股/日韩复盘行为。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 
@@ -25,6 +25,7 @@ class MarketProfile:
     has_market_stats: bool
     # 市场概况是否包含板块涨跌（A 股有，美股暂无）
     has_sector_rankings: bool
+    expected_index_codes: List[str] = field(default_factory=list)
 
 
 CN_PROFILE = MarketProfile(
@@ -38,6 +39,7 @@ CN_PROFILE = MarketProfile(
     prompt_index_hint="分析上证、深证、创业板等各指数走势特点",
     has_market_stats=True,
     has_sector_rankings=True,
+    expected_index_codes=['000001', '399001', '399006', '000688', '000016', '000300'],
 )
 
 US_PROFILE = MarketProfile(
@@ -51,6 +53,7 @@ US_PROFILE = MarketProfile(
     prompt_index_hint="分析标普500、纳斯达克、道指等各指数走势特点",
     has_market_stats=False,
     has_sector_rankings=False,
+    expected_index_codes=['SPX', 'IXIC', 'DJI'],
 )
 
 HK_PROFILE = MarketProfile(
@@ -64,6 +67,7 @@ HK_PROFILE = MarketProfile(
     prompt_index_hint="分析恒生指数、恒生科技指数、国企指数等各指数走势特点",
     has_market_stats=False,
     has_sector_rankings=False,
+    expected_index_codes=['HSI', 'HSTECH', 'HSCEI'],
 )
 
 JP_PROFILE = MarketProfile(
@@ -77,6 +81,7 @@ JP_PROFILE = MarketProfile(
     prompt_index_hint="分析日经225、东证指数等日本主要指数走势特点",
     has_market_stats=False,
     has_sector_rankings=False,
+    expected_index_codes=['N225', 'TOPX'],
 )
 
 KR_PROFILE = MarketProfile(
@@ -90,6 +95,7 @@ KR_PROFILE = MarketProfile(
     prompt_index_hint="分析 KOSPI、KOSDAQ 等韩国主要指数走势特点",
     has_market_stats=False,
     has_sector_rankings=False,
+    expected_index_codes=['KS11', 'KQ11'],
 )
 
 

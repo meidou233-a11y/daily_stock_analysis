@@ -1076,6 +1076,22 @@ class EfinanceFetcher(BaseFetcher):
         pre_close_col = next((c for c in ['昨收', '昨日收盘', 'pre_close','lastClose'] if c in df.columns), None)
         amount_col = next((c for c in ['成交额', '成交额', 'amount','amount'] if c in df.columns), None) 
         
+        required_columns = [code_col, name_col, close_col, pre_close_col, amount_col]
+        if any(column is None for column in required_columns):
+            logger.warning("[MarketStats] 行情字段不完整，继续数据源降级")
+            return None
+        for column in (close_col, pre_close_col, amount_col):
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+        # Suspended, placeholder and non-finite rows must not poison the whole snapshot.
+        valid = (
+            np.isfinite(df[close_col]) & np.isfinite(df[pre_close_col])
+            & np.isfinite(df[amount_col]) & (df[close_col] > 0)
+            & (df[pre_close_col] > 0) & (df[amount_col] > 0)
+        )
+        df = df.loc[valid].drop_duplicates(subset=[code_col])
+        if df.empty:
+            return None
+
         limit_up_count = 0
         limit_down_count = 0
         up_count = 0
