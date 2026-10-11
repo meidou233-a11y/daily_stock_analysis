@@ -702,8 +702,7 @@ class NewsEvidenceSourcesTestCase(unittest.TestCase):
         """零命中时 format_intel_report 仍吐占位文本，绝不能被当成证据。
 
         这是真实反例（review OR-COR-8f4c2d1b）：`format_intel_report()` 即使所有
-        维度都失败，也会输出「【XX 情报搜索结果】」标题和每个维度的「未找到相关
-        信息」，整段永远非空。曾经的实现把整段 news_context 传进判定函数，于是
+        维度都失败，也会输出「【XX 情报搜索结果】」标题和各维度失败说明，整段永远非空。曾经的实现把整段 news_context 传进判定函数，于是
         「搜了但一条没拿到」被翻成「有证据」，恰好吞掉本 PR 要补的那条披露。
         这里用真实函数产出反例，不用 mock。
         """
@@ -724,7 +723,8 @@ class NewsEvidenceSourcesTestCase(unittest.TestCase):
 
         # 前提：这段占位文本确实非空，否则这条反例就失去意义
         self.assertTrue(placeholder.strip())
-        self.assertIn("未找到相关信息", placeholder)
+        self.assertIn("检索失败", placeholder)
+        self.assertNotIn("未找到相关信息", placeholder)
 
         # 按来源登记：实时 0 条、无社交、无本地资讯池 —— 必须判定为没有证据
         self.assertFalse(news_evidence_present(0, None, None))
