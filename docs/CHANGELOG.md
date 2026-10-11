@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 自动选股跳过仅复盘模式，保留超时前已完成策略候选，恢复 A 股快照缓存配置并避免无效追加数量中断固定自选分析。
+
 - [新功能] 每日 Actions 支持固定追加自选及 A/港/美三市场临时候选池，合并放量突破、价值质量、趋势质量三类筛选，每日限额且不永久累积；市场失败或超时保留固定自选。
 
 - [新功能] Server酱3 支持逗号分隔的多个 SendKey 并独立发送；Actions 可通过 SERVERCHAN3_SENDKEY_EXTRA Secret 追加目标，保留原推送；失败日志不回显含密钥的 URL。

@@ -18,15 +18,26 @@ def worker(market, output):
     profiles = yaml.safe_load(Path(os.getenv("AUTO_SCREEN_CONFIG", ROOT / "config/auto-screening.yaml")).read_text())
     config = Config.from_env()
     snapshot = fetch_market_snapshot(market, config, int(os.getenv("AUTO_SCREEN_UNIVERSE_LIMIT", "50")))
+    def checkpoint(rows, warnings):
+        path = Path(output)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"candidates": rows, "warnings": warnings}, ensure_ascii=False))
+        temporary.replace(path)
+
     rows, warnings = screen_snapshot(snapshot, market, profiles["markets"][market],
                                     daily_limit=int(os.getenv("AUTO_SCREEN_DAILY_LIMIT", "5")),
-                                    history_fetcher=foreign_history if market != "cn" else None)
-    Path(output).write_text(json.dumps({"candidates": rows, "warnings": warnings}, ensure_ascii=False))
+                                    history_fetcher=foreign_history if market != "cn" else None, checkpoint=checkpoint)
+    checkpoint(rows, warnings)
 
 
 def prepare(output):
     from src.services.auto_stock_pool import merge_daily_pool
     pools, warnings = {}, []
+    try:
+        limit = max(0, min(20, int(os.getenv("AUTO_SCREEN_MAX_ADDITIONS", "5"))))
+    except ValueError:
+        limit = 5
+        warnings.append("Invalid AUTO_SCREEN_MAX_ADDITIONS; using default 5")
     enabled = os.getenv("AUTO_SCREEN_ENABLED", "false").lower() == "true"
     if enabled:
         for market in os.getenv("AUTO_SCREEN_MARKETS", "cn,hk,us").split(","):
@@ -44,8 +55,16 @@ def prepare(output):
                     warnings.extend(result["warnings"])
                 except (subprocess.TimeoutExpired, RuntimeError, OSError, ValueError, KeyError) as exc:
                     warnings.append(f"{market}: {type(exc).__name__}; fixed watchlist retained")
+                    # Keep completed styles even if the daily-history style timed out.
+                    if Path(result_path).exists():
+                        try:
+                            partial = json.loads(Path(result_path).read_text())
+                            pools[market] = partial["candidates"]
+                            warnings.extend(partial["warnings"])
+                        except (OSError, ValueError, KeyError, TypeError):
+                            warnings.append(f"{market}: unreadable partial screening result")
     codes, added = merge_daily_pool(os.getenv("STOCK_LIST", ""), os.getenv("STOCK_LIST_EXTRA", ""), pools,
-                                  limit=max(0, min(20, int(os.getenv("AUTO_SCREEN_MAX_ADDITIONS", "5")))))
+                                  limit=limit)
     if not codes:
         raise ValueError("Empty stock pool")
     Path(output).parent.mkdir(parents=True, exist_ok=True)

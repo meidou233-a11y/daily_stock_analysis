@@ -54,7 +54,10 @@ def merge_daily_pool(base, extra, candidates, limit=5):
 
 def fetch_market_snapshot(market, config, universe_limit):
     if market == "cn":
-        return fetch_snapshot_with_fallback(config.snapshot_source_priority, market="cn")
+        return fetch_snapshot_with_fallback(config.snapshot_source_priority, market="cn",
+                                            fallback_snapshot_path=config.fallback_snapshot_path,
+                                            fallback_max_age_hours=config.snapshot_fallback_max_age_hours,
+                                            cache_ttl_seconds=config.snapshot_cache_ttl_seconds)
     if market == "us":
         # The existing adapter supports an explicit configurable universe.
         import os
@@ -72,20 +75,23 @@ def fetch_market_snapshot(market, config, universe_limit):
     return fetch_us_snapshot(tickers=tickers)
 
 
-def screen_snapshot(snapshot, market, profiles, daily_limit=20, history_fetcher=None):
+def screen_snapshot(snapshot, market, profiles, daily_limit=20, history_fetcher=None, checkpoint=None):
     """Union enabled strategy results; missing required data never counts as a match."""
     strategies = load_all_strategies(Config.from_env().strategies_dir)
     winners = {}
     warnings = []
-    for strategy_name, overrides in profiles.items():
+    # Complete snapshot-only styles before potentially slow daily-history requests.
+    ordered = sorted(profiles.items(), key=lambda item: requires_daily_features(
+        replace(strategies[item[0]].screening.hard_filters, **item[1])))
+    for strategy_name, overrides in ordered:
         try:
             strategy = strategies[strategy_name]
             filters = replace(strategy.screening.hard_filters, **overrides)
             pool = apply_hard_filters(snapshot, without_daily_filters(filters))
-            pool = pool.sort_values("amount", ascending=False).head(daily_limit)
             if pool.empty:
                 continue
             if requires_daily_features(filters):
+                pool = pool.sort_values("amount", ascending=False).head(daily_limit)
                 pool = enrich_daily_features(pool, max_rows=daily_limit, history_fetcher=history_fetcher)
             pool = apply_hard_filters(pool, filters)
             ranked = compute_screen_scores(pool, strategy.screening)
@@ -107,6 +113,9 @@ def screen_snapshot(snapshot, market, profiles, daily_limit=20, history_fetcher=
                     previous["strategies"] = matches
         except Exception as exc:
             warnings.append(f"{market}/{strategy_name}: {type(exc).__name__}")
+        finally:
+            if checkpoint:
+                checkpoint(list(winners.values()), list(warnings))
     return sorted(winners.values(), key=lambda row: (-row["score"], row["code"])), warnings
 
 

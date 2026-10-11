@@ -447,8 +447,11 @@ jobs:
           fi
 
           # 每次只更新当前进程的分析列表，不覆盖固定自选 Secret/Variable。
-          python scripts/prepare_daily_stock_pool.py --output reports/daily_stock_pool.txt
-          export STOCK_LIST="$(cat reports/daily_stock_pool.txt)"
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          if [ "$MODE" != "market-only" ]; then
+            python scripts/prepare_daily_stock_pool.py --output reports/daily_stock_pool.txt
+            export STOCK_LIST="$(cat reports/daily_stock_pool.txt)"
+          fi
 
           # 处理 LITELLM YAML 配置文件
           if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
@@ -481,7 +484,7 @@ jobs:
             echo "  LiteLLM: ❌ 未配置"
           fi
           echo "  Gemini API Key: $([ -n "$GEMINI_API_KEY" ] && echo '✅ 已配置' || echo '❌ 未配置')"
-          echo "  DeepSeek Key:   $([ -n "$DEEPSEEK_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
+          echo "  DeepSeek Key:   $([ -n "$DEEPSEEK_API_KEY$LLM_DEEPSEEK_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  Anspire Key:    $([ -n "$ANSPIRE_API_KEYS" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  AIHubMix Key:   $([ -n "$AIHUBMIX_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
           echo "  OpenAI API Key: $([ -n "$OPENAI_API_KEY" ] && echo '✅ 已配置' || echo '⚪ 未配置')"
