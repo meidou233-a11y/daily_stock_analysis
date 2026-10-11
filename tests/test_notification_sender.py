@@ -1693,41 +1693,15 @@ class TestServerchan3Sender(unittest.TestCase):
                 self.assertFalse(sender.send_to_serverchan3("hello"))
 
     @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
-    def test_long_unicode_report_is_complete_and_bounded(self, mock_post):
+    def test_long_report_is_one_complete_request_per_recipient(self, mock_post):
         mock_post.return_value = _response(200, {"code": 0})
         sender = Serverchan3Sender(_config(serverchan3_sendkey="SCTfirst,SCTsecond"))
-        content = "\n---\n".join(f"## 股票 {i}\n" + "中文📈" * 1200 for i in range(8))
-        self.assertTrue(sender.send_to_serverchan3(content, "报告", timeout_seconds=3))
-        calls = mock_post.call_args_list
-        first = [c for c in calls if c.args[0].endswith("SCTfirst.send")]
-        second = [c for c in calls if c.args[0].endswith("SCTsecond.send")]
-        self.assertGreater(len(first), 1)
-        self.assertEqual(len(first), len(second))
-        self.assertEqual("".join(c.kwargs["json"]["desp"] for c in first), content)
-        for index, call in enumerate(first, 1):
-            self.assertLessEqual(len(call.kwargs["json"]["desp"].encode("utf-8")), 30_000)
-            self.assertEqual(call.kwargs["json"]["title"], f"报告 ({index}/{len(first)})")
-            self.assertEqual(call.kwargs["timeout"], 3)
-        self.assertEqual([c.kwargs["json"] for c in first], [c.kwargs["json"] for c in second])
-
-    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
-    def test_failed_part_does_not_skip_remaining_parts_or_recipients(self, mock_post):
-        mock_post.side_effect = [_response(500, {})] + [_response(200, {"code": 0})] * 3
-        sender = Serverchan3Sender(_config(serverchan3_sendkey="SCTfirst,SCTsecond"))
-        content = "中文📈" * 2000 + "\n---\n" + "中文📈" * 2000
-        self.assertFalse(sender.send_to_serverchan3(content))
-        self.assertEqual(mock_post.call_count, 4)
-
-    @mock.patch("src.notification_sender.serverchan3_sender.requests.post")
-    def test_unbroken_unicode_body_is_not_dropped(self, mock_post):
-        from src.formatters import TRUNCATION_SUFFIX
-        mock_post.return_value = _response(200, {"code": 0})
-        sender = Serverchan3Sender(_config(serverchan3_sendkey="SCTfirst"))
-        content = "中文📈" * 7000
-        self.assertTrue(sender.send_to_serverchan3(content))
-        parts = [c.kwargs["json"]["desp"] for c in mock_post.call_args_list]
-        self.assertTrue(all(len(p.encode("utf-8")) <= 30_000 for p in parts))
-        self.assertEqual("".join(p.removesuffix(TRUNCATION_SUFFIX) for p in parts), content)
+        content = "中文📈" * 10000
+        self.assertTrue(sender.send_to_serverchan3(content, "全部报告"))
+        self.assertEqual(mock_post.call_count, 2)
+        for call in mock_post.call_args_list:
+            self.assertEqual(call.kwargs["json"]["desp"], content)
+            self.assertEqual(call.kwargs["json"]["title"], "全部报告")
 
     def test_send_returns_false_when_no_sendkey(self):
         cfg = _config()

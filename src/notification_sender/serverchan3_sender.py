@@ -12,15 +12,10 @@ from datetime import datetime
 import re
 
 from src.config import Config
-from src.formatters import chunk_content_by_max_bytes, strip_hidden_markdown_metadata
+from src.formatters import strip_hidden_markdown_metadata
 
 
 logger = logging.getLogger(__name__)
-
-# Conservative payload budget for SC3 and compatible Turbo endpoints.
-# This is a transport budget, not a claimed official SC3 maximum.
-SERVERCHAN_MAX_BYTES = 30_000
-
 
 class Serverchan3Sender:
     
@@ -48,24 +43,13 @@ class Serverchan3Sender:
             logger.warning("Server酱3 SendKey 未配置，跳过推送")
             return False
         sanitized_content = strip_hidden_markdown_metadata(content).strip()
-        chunks = chunk_content_by_max_bytes(sanitized_content, SERVERCHAN_MAX_BYTES)
-        base_title = title if title is not None else f"📈 股票分析报告 - {datetime.now():%Y-%m-%d}"
         results = []
-        for recipient_index, key in enumerate(keys, 1):
-            for part_index, chunk in enumerate(chunks, 1):
-                part_title = (
-                    f"{base_title} ({part_index}/{len(chunks)})"
-                    if len(chunks) > 1 else base_title
-                )
-                success = self._send_to_serverchan3_key(
-                    key, chunk, part_title, timeout_seconds=timeout_seconds,
-                )
-                logger.info(
-                    "Server酱3 目标 %d 分段 %d/%d (%d bytes): %s",
-                    recipient_index, part_index, len(chunks), len(chunk.encode("utf-8")),
-                    "成功" if success else "失败",
-                )
-                results.append(success)
+        for index, key in enumerate(keys, 1):
+            success = self._send_to_serverchan3_key(
+                key, sanitized_content, title, timeout_seconds=timeout_seconds,
+            )
+            logger.info("Server酱3 目标 %d: %s", index, "成功" if success else "失败")
+            results.append(success)
         return all(results)
 
     def _send_to_serverchan3_key(

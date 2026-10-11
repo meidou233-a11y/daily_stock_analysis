@@ -17,6 +17,15 @@ on:
           - full          # 完整分析（股票+大盘）
           - market-only   # 仅大盘复盘
           - stocks-only   # 仅股票分析
+          - resend        # 仅补发已有报告，不重新分析
+      source_report_run_id:
+        description: '补发模式：原报告 Actions run ID'
+        required: false
+        type: string
+      source_report_date:
+        description: '补发模式：原报告日期 YYYYMMDD'
+        required: false
+        type: string
       force_run:
         description: '强制运行（跳过交易日检查）'
         required: false
@@ -30,6 +39,9 @@ concurrency:
 
 jobs:
   analyze:
+    permissions:
+      contents: read
+      actions: read
     runs-on: ubuntu-latest
     # 兼容误将 STOCK_LIST 配到同名 Environment variables 的场景；
     # 推荐位置仍是 Settings -> Secrets and variables -> Actions -> Repository variables。
@@ -415,6 +427,11 @@ jobs:
           # ==========================================
           # 运行配置 ⬅️ 新增！
           # ==========================================
+          DAILY_NOTIFICATION_LAYOUT: ${{ vars.DAILY_NOTIFICATION_LAYOUT || 'two_part' }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SOURCE_REPORT_RUN_ID: ${{ github.event.inputs.source_report_run_id }}
+          SOURCE_REPORT_DATE: ${{ github.event.inputs.source_report_date }}
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
           REPORT_LANGUAGE: ${{ vars.REPORT_LANGUAGE || secrets.REPORT_LANGUAGE || '' }}
           REPORT_SHOW_LLM_MODEL: ${{ vars.REPORT_SHOW_LLM_MODEL || secrets.REPORT_SHOW_LLM_MODEL || 'true' }}
@@ -436,6 +453,17 @@ jobs:
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
           
         run: |
+          MODE="${{ github.event.inputs.mode || 'full' }}"
+          if [ "$MODE" = "resend" ]; then
+            [[ "$SOURCE_REPORT_RUN_ID" =~ ^[0-9]+$ ]] || { echo "Invalid source run ID"; exit 1; }
+            [[ "$SOURCE_REPORT_DATE" =~ ^[0-9]{8}$ ]] || { echo "Invalid source report date"; exit 1; }
+            gh run download "$SOURCE_REPORT_RUN_ID" --pattern 'analysis-reports-*' --dir reports-replay
+            mkdir -p reports
+            cp -R reports-replay/reports/. reports/
+            python scripts/send_daily_notifications.py --date "$SOURCE_REPORT_DATE"
+            exit $?
+          fi
+
           # 解析自选股配置：
           # 1. Repository/Environment secrets 或 Repository variables（STOCK_LIST_CONFIG）
           # 2. 同名 Environment variables 注入的 runner 环境变量（STOCK_LIST）
@@ -541,13 +569,23 @@ jobs:
             echo "⚡ 已启用强制运行模式（跳过交易日检查）"
           fi
 
+          # 两条日报先保存完整分析，再统一发送；避免旧通知重复。
+          NOTIFY_ARGS=()
+          if [ "$DAILY_NOTIFICATION_LAYOUT" = "two_part" ]; then
+            NOTIFY_ARGS=(--no-notify)
+            export REPORT_TYPE=simple
+            export SINGLE_STOCK_NOTIFY=false
+          fi
           # 执行分析
           if [ "$MODE" = "market-only" ]; then
-            python main.py --market-review $FORCE_RUN_ARG
+            python main.py --market-review $FORCE_RUN_ARG "${NOTIFY_ARGS[@]}"
           elif [ "$MODE" = "stocks-only" ]; then
-            python main.py --no-market-review $FORCE_RUN_ARG
+            python main.py --no-market-review $FORCE_RUN_ARG "${NOTIFY_ARGS[@]}"
           else
-            python main.py $FORCE_RUN_ARG
+            python main.py $FORCE_RUN_ARG "${NOTIFY_ARGS[@]}"
+          fi
+          if [ "$DAILY_NOTIFICATION_LAYOUT" = "two_part" ]; then
+            python scripts/send_daily_notifications.py
           fi
       
       - name: 上传分析报告

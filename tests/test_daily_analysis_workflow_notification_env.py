@@ -91,3 +91,13 @@ def test_notification_actions_env_table_matches_generated_output() -> None:
     expected = generate_table()
 
     assert normalize_markdown_block(current) == normalize_markdown_block(expected)
+
+
+def test_two_part_delivery_suppresses_original_push_and_replay_reuses_reports():
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    env = _load_daily_analysis_env()
+    assert env["DAILY_NOTIFICATION_LAYOUT"] == "${{ vars.DAILY_NOTIFICATION_LAYOUT || 'two_part' }}"
+    assert "NOTIFY_ARGS=(--no-notify)" in text
+    assert 'python main.py $FORCE_RUN_ARG "${NOTIFY_ARGS[@]}"' in text
+    assert 'gh run download "$SOURCE_REPORT_RUN_ID"' in text
+    assert 'python scripts/send_daily_notifications.py --date "$SOURCE_REPORT_DATE"' in text
