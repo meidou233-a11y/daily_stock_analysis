@@ -24,3 +24,5 @@ A 股从现有全市场快照源筛选。港股以 AkShare 港股快照成交额
 本地可运行：`AUTO_SCREEN_ENABLED=true STOCK_LIST=600519 python scripts/prepare_daily_stock_pool.py --output reports/daily_stock_pool.txt`。脚本不会修改本地 `.env`；本地定时服务、Web 及选股 API 行为不变，这次仅接入每日 Actions。停用时设 `AUTO_SCREEN_ENABLED=false`，仍保留固定追加列表；整体回滚 revert 对应提交，无数据迁移。本专题没有英文对应文件，双语首页未变更。
 
 仅大盘复盘模式跳过选股。快照策略先完成并保存中间结果，日 K 策略超时仍保留已完成候选；追加数量格式错误时回退默认 5。A 股沿用现有快照缓存路径、TTL 和最大回退时效。
+
+美股份额候选按内部格式规范化（例如 Yahoo `BRK-B` 转为 `BRK.B`），避免被国内行情适配器处理；调用 Yahoo 历史及实时接口时再转回连字符。候选代码必须通过现有美股识别规则，指数或无法识别的符号不加入股票池。

@@ -1,4 +1,5 @@
 """Build a disposable daily pool using the bundled screening filters and scores."""
+from data_provider.us_index_mapping import is_us_stock_code
 from dataclasses import replace
 import re
 
@@ -21,7 +22,10 @@ def canonical_code(value, market):
         return "hk" + match.group(1).zfill(5) if match else ""
     if market == "cn":
         return value.zfill(6) if value.isdigit() and len(value) <= 6 else ""
-    return value.upper() if re.fullmatch(r"[A-Za-z][A-Za-z0-9.-]{0,19}", value) else ""
+    normalized = value.upper()
+    if re.fullmatch(r"[A-Z]{1,5}-[A-Z]", normalized):
+        normalized = normalized.replace("-", ".")
+    return normalized if is_us_stock_code(normalized) else ""
 
 
 def merge_daily_pool(base, extra, candidates, limit=5):
@@ -120,4 +124,5 @@ def screen_snapshot(snapshot, market, profiles, daily_limit=20, history_fetcher=
 
 
 def foreign_history(code, **kwargs):
-    return fetch_daily_history_yfinance(code, lookback_days=kwargs.get("lookback_days", 120))
+    yahoo_code = code.replace(".", "-") if is_us_stock_code(code) else code
+    return fetch_daily_history_yfinance(yahoo_code, lookback_days=kwargs.get("lookback_days", 120))
