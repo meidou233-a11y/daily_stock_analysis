@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [修复] 每日日报避开整点触发，增加当天缺少完整双卡接口回执时的备用补跑；统一 Actions 北京时间，手动补发保留，回执明确区分接口接受与手机送达。
+
 - [修复] 历史报告补发兼容 gh 按 artifact 名称创建的下载子目录；报告目录缺失或不唯一时明确失败，避免误发。
 
 - [改进] 每日日报支持两条 Server酱推送：自选股仪表盘附智慧选股，以及大盘复盘附个股概况；取消长度分段，保留原始详报，并可从原 Actions artifact 向全部接收端补发。

@@ -59,6 +59,8 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"\d{8}", args.date):
         parser.error("date must be YYYYMMDD")
+    receipt = args.report_dir / f"delivery_receipt_{args.date}.json"
+    receipt.unlink(missing_ok=True)
     def read(name):
         path = args.report_dir / name
         return path.read_text(encoding="utf-8") if path.exists() else ""
@@ -81,7 +83,17 @@ def main():
     ):
         (args.report_dir / f"{name}_{args.date}.md").write_text(content, encoding="utf-8")
         statuses.append(sender.send_to_serverchan3(content, f"{args.date} {title}"))
-    return 0 if all(statuses) else 1
+    accepted = all(statuses)
+    if accepted and stock and market:
+        receipt.write_text(json.dumps({
+            "date": args.date, "status": "api_accepted", "cards": len(cards),
+            "phone_delivery_confirmed": False,
+        }), encoding="utf-8")
+        if os.getenv("GITHUB_OUTPUT"):
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write(f"delivery_date={args.date}\n")
+    logging.info("日报 %s：%d 条，接口全部接受=%s", args.date, len(cards), accepted)
+    return 0 if accepted else 1
 
 
 if __name__ == "__main__":

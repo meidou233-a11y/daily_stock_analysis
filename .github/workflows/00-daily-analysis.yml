@@ -1,9 +1,10 @@
 name: 每日股票分析
 
 on:
-  # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
+  # 避开整点拥堵；备用触发只在当天缺少推送回执时分析。
   schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+    - cron: '7 10 * * 1-5'     # 北京时间 18:07
+    - cron: '37 11 * * 1-5'    # 北京时间 19:37，漏推补跑
   
   # 手动触发
   workflow_dispatch:
@@ -38,7 +39,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  delivery_gate:
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.guard.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: guard
+        name: 检查当天推送回执
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          TRIGGER_SCHEDULE: ${{ github.event.schedule }}
+          DAILY_NOTIFICATION_LAYOUT: ${{ vars.DAILY_NOTIFICATION_LAYOUT || 'two_part' }}
+        run: python3 scripts/daily_delivery_guard.py
+
   analyze:
+    needs: delivery_gate
+    if: needs.delivery_gate.outputs.skip != 'true'
     permissions:
       contents: read
       actions: read
@@ -48,6 +69,8 @@ jobs:
     environment: STOCK_LIST
     # 添加超时限制，防止任务卡死
     timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '30') }}
+    env:
+      TZ: Asia/Shanghai
     
     steps:
       - name: 随机延迟（避免固定时间访问）
@@ -73,6 +96,7 @@ jobs:
           mkdir -p data logs reports
       
       - name: 执行股票分析
+        id: analysis
         env:
           # ==========================================
           # AI 配置
@@ -600,6 +624,15 @@ jobs:
             reports/
             logs/
           retention-days: 30
+
+      - name: 上传接口接受回执
+        uses: actions/upload-artifact@v6
+        if: always() && steps.analysis.outputs.delivery_date != ''
+        with:
+          name: daily-delivery-${{ steps.analysis.outputs.delivery_date }}
+          path: reports/delivery_receipt_${{ steps.analysis.outputs.delivery_date }}.json
+          if-no-files-found: error
+          retention-days: 7
       
       - name: 显示运行结果
         if: always()
