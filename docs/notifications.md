@@ -29,6 +29,8 @@ Discord 长报告发送复用现有分片链路：单条 `content` 运行时不�
 
 Server酱3 多目标发送：本地 / Docker 使用逗号分隔的 `SERVERCHAN3_SENDKEY`，重复密钥自动去重。GitHub Actions 保留原 `SERVERCHAN3_SENDKEY` Secret，另建 `SERVERCHAN3_SENDKEY_EXTRA` Secret 追加目标；每日分析工作流将两者合并。每个目标独立请求（默认超时 10 秒），一个目标失败仍尝试后续目标；只有所有目标都返回业务码 `code=0` 才确认渠道成功。追加目标会增加总发送时间，请勿把密钥写入代码或日志。每个目标每张报告只发送一次，不再按长度分段。每日默认采用两条模式（`DAILY_NOTIFICATION_LAYOUT=two_part`）；该模式在执行分析时设 `REPORT_TYPE=simple`、`SINGLE_STOCK_NOTIFY=false`，以保留完整仪表盘，覆盖旧的 brief / 单股通知变量。设 `DAILY_NOTIFICATION_LAYOUT=standard` 可恢复普通渠道发送；先以 `--no-notify` 保存原报告，再统一发送“自选股仪表盘与每日智慧选股”和“大盘复盘与个股情况”。第一条保留核心结论、当日行情、作战计划，附自动候选代码/分数/命中策略和筛选降级；第二条保留大盘报告和全部个股概况。原始详报与两张通知 Markdown 均上传 artifact。此模式复用两个 Server酱 Secret，暂仅发送 Server酱，不额外启用其他渠道。超过保守单条预算 60,000 UTF-8 字节会显式失败，原文保留，不静默拆分或截断。仅补发时选择 `resend` 模式并填写原 run ID 和报告日期；不重新调用行情、选股或模型。补发会定位下载目录中唯一的 reports 目录，兼容 artifact 名称子目录；缺失或存在多个报告目录时停止发送。
 
+每日 Actions 在工作日北京时间 18:07 触发，19:37 再检查一次。GitHub 的定时调度可能延迟或丢失（见 [GitHub schedule 文档](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)），备用触发仍不构成准点保证。仅当两张报告都存在且全部目标均被接口接受时，生成不含密钥的 `delivery_receipt_YYYYMMDD.json` 并上传 `daily-delivery-YYYYMMDD` artifact；定时任务找到默认分支当天的有效回执就跳过，避免重复分析与推送。只生成部分报告、任一发送失败或回执上传失败时可补跑；回执 API 不可用时告警并继续，可能重复。手动 full/resend 始终允许，不受此去重影响。standard 模式只保留首个触发，不执行双卡备用补跑。Actions 使用 `TZ=Asia/Shanghai`，报告文件日期与通知日期保持一致。本地/Docker 的 SCHEDULE_TIME 不受修改。接口 `code=0` 只证明 Server酱接受请求；回执的 `phone_delivery_confirmed=false` 不代表手机已收到。遇到接口成功但手机缺失时，需检查 Server酱消息记录、设备绑定和系统通知权限。
+
 ## Minimal / Advanced 分层
 
 - Minimal key：足以启用一个通知渠道的最小配置。
