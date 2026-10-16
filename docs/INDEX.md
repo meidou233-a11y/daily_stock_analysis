@@ -14,6 +14,7 @@
 | 使用 Bot / IM 接入 | [Bot 命令与接入](bot-command.md) | [Bot 平台配置](bot/)、[Grok Bot 集成](grok-bot-integration.md) |
 | 排查运行问题 | [FAQ](FAQ.md) | [更新日志](CHANGELOG.md) |
 | 处理数据源失败或降级 | [数据源稳定性与故障处理图示](data-source-stability.md) | [FAQ](FAQ.md) |
+| 排查 Actions 排程没有执行 | [Actions 排程可靠性与静默失效处理](actions-reliability.md) | [FAQ](FAQ.md) |
 | 参与开发或提交 PR | [贡献指南](CONTRIBUTING.md) | [API 规格](architecture/api_spec.json) |
 
 ## 快速开始
@@ -62,6 +63,7 @@
 | [云端 WebUI 部署](deploy-webui-cloud.md) | 云服务器访问 WebUI 的部署说明 |
 | [Zeabur 部署](docker/zeabur-deployment.md) | Zeabur 平台部署说明 |
 | [桌面端打包说明](desktop-package.md) | Electron 桌面端和 Web 构建产物打包说明 |
+| [Actions 排程可靠性与静默失效处理](actions-reliability.md) | fork / 闲置停用的区分方式、诊断命令、心跳监控配置、keepalive 边界与恢复流程 |
 
 ## 参考与开发
 
