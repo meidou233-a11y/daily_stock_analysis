@@ -88,6 +88,16 @@ class TestFetchYfTickerData(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_weekend_window_uses_last_two_sessions(self):
+        hist = _make_mock_hist(close=5100.0, prev_close=5000.0)
+        hist.index = pd.to_datetime(['2026-10-15', '2026-10-16'])
+        mock_yf = _make_mock_yf(hist)
+        mock_yf.Ticker.return_value.history.side_effect = lambda period: hist if period == '5d' else hist.iloc[-1:]
+        result = self.fetcher._fetch_yf_ticker_data(mock_yf, '^HSI', '恒生指数', 'HSI')
+        self.assertEqual(result['data_date'], '2026-10-16')
+        self.assertEqual(result['prev_close'], 5000.0)
+        self.assertAlmostEqual(result['change_pct'], 2.0)
+
 
 class TestGetUsMainIndices(unittest.TestCase):
     """_get_us_main_indices 美股指数批量获取测试"""

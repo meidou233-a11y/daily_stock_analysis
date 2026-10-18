@@ -44,6 +44,11 @@ def _build_mock_ticker(
 
 
 class TestYfinanceSymbolConversion(unittest.TestCase):
+    def test_us_share_classes_use_yahoo_hyphen(self) -> None:
+        self.assertEqual(_convert_to_yf_symbol("BRK.B"), "BRK-B")
+        self.assertEqual(_convert_to_yf_symbol("BRK-B"), "BRK-B")
+        self.assertEqual(_convert_to_yf_symbol("BF.B"), "BF-B")
+
     def test_us_passthrough(self) -> None:
         self.assertEqual(_convert_to_yf_symbol("AAPL"), "AAPL")
         self.assertEqual(_convert_to_yf_symbol(" tsla "), "TSLA")

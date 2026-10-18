@@ -319,8 +319,8 @@ class YfinanceFetcher(BaseFetcher):
             行情字典，失败时返回 None
         """
         ticker = yf.Ticker(yf_code)
-        # 取近两日数据以计算涨跌幅
-        hist = ticker.history(period='2d')
+        # 使用标准五日窗口，跨周末时仍能取得相邻两条交易记录。
+        hist = ticker.history(period='5d')
         if hist.empty or 'Close' not in hist.columns:
             return None
         hist = hist.dropna(subset=['Close'])
