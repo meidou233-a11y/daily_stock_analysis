@@ -39,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 智能导入兼容带 UTF-8 BOM 的 CSV 与剪贴板文本，避免 `code` 表头被误当成数据并丢失有效股票代码。
 - [修复] 为 AkShare 大盘涨跌统计的东财与新浪降级调用增加可强制终止的子进程超时，避免外部接口无响应时长期占用分析线程（Fixes #2340）。
 
+- [新功能] 每日 Actions 支持 `HEARTBEAT_URL` 死信开关：任务结束后向外部监控上报心跳（含 `status`/`run`/`date`），未配置时该步骤为空操作；排程被静默停用时不再没有任何可发现的信号。
+
+- [新功能] 新增 `actions-keepalive` 工作流：每周检查并把被 GitHub 停用的 workflow 重新启用（需 `KEEPALIVE_TOKEN`，未配置时仅提示并正常退出），覆盖闲置 60 天与手动停用场景。
+
+- [文档] 新增《Actions 排程可靠性与静默失效处理》，说明 fork 与 repo 层停用的区分方式、诊断命令、心跳监控配置、keepalive 边界与恢复流程；补充 repo 层停用时 `state`/`enabled` 可能仍显示正常的实测结论。
+
+- [测试] 新增 `tests/test_send_heartbeat.py`：覆盖未配置即空操作、非 http(s) 拒绝、未知状态一律不报成功、ping URL 拼接、传输失败只告警不失败，以及心跳步骤与 keepalive 工作流的接线契约。
+
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 

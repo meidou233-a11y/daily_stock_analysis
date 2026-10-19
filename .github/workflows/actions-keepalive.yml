@@ -1,0 +1,70 @@
+name: Actions Keepalive
+
+# GitHub 会自动停用 Actions：public repo 闲置 60 天会关闭排程，fork 也可能被整体停用。
+# 排程被静默停用时不会产生任何 run，因此没有任何失败可供发现。
+# 本 workflow 定期检查并重新启用被停用的 workflow。
+#
+# 需要 Repository secret `KEEPALIVE_TOKEN`：一个具备 `workflow` scope 的 PAT。
+# 未配置时本 workflow 仅提示并正常退出，不影响其他流程。
+#
+# 已知边界：如果 GitHub 把整个 repo 的 Actions 停用（fork 策略），
+# repo 内任何 workflow 都不会被调度，本 workflow 同样无法运行。
+# 该场景只能靠外部监控（见 docs/actions-reliability.md）发现，并在网页手动启用恢复。
+
+on:
+  schedule:
+    # 每周一 UTC 03:23（北京时间 11:23），避开整点拥堵
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: actions-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🔓 重新启用被停用的 workflow
+        env:
+          GH_TOKEN: ${{ secrets.KEEPALIVE_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::notice::未配置 KEEPALIVE_TOKEN，跳过 keepalive（监控未开启）"
+            exit 0
+          fi
+
+          # repo 层停用（例如 fork 策略）是 best-effort：部分场景必须网页手动启用。
+          if gh api -X PUT "repos/${REPO}/actions/permissions" -F enabled=true >/dev/null 2>&1; then
+            echo "已确认 repo 层 Actions 为启用状态"
+          else
+            echo "::warning::repo 层 Actions 启用请求未成功（可能需要 workflow scope 或网页手动启用）"
+          fi
+
+          disabled="$(gh api "repos/${REPO}/actions/workflows" \
+            --jq '.workflows[] | select(.state != "active") | [.id, .state, .path] | @tsv')"
+          if [ -z "${disabled}" ]; then
+            echo "所有 workflow 均为 active，无需处理"
+            exit 0
+          fi
+
+          echo "发现被停用的 workflow："
+          echo "${disabled}"
+          failed=0
+          while IFS="$(printf '\t')" read -r id state path; do
+            [ -n "${id}" ] || continue
+            if gh api -X PUT "repos/${REPO}/actions/workflows/${id}/enable" >/dev/null 2>&1; then
+              echo "已重新启用 ${path}（原状态 ${state}）"
+            else
+              echo "::warning::重新启用 ${path} 失败（原状态 ${state}）"
+              failed=1
+            fi
+          done <<< "${disabled}"
+          exit "${failed}"
