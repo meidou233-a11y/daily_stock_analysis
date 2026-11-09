@@ -22,7 +22,7 @@ def should_skip(environ, fetch_artifacts, date):
         return False
     if environ.get("DAILY_NOTIFICATION_LAYOUT", "two_part") != "two_part":
         # Standard channels have no two-card receipt; keep only their primary trigger.
-        return environ.get("TRIGGER_SCHEDULE") == "37 11 * * 1-5"
+        return environ.get("TRIGGER_SCHEDULE") == "37 11 * * *"
     return has_receipt(fetch_artifacts(date), date, environ["DEFAULT_BRANCH"])
 
 
