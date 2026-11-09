@@ -72,5 +72,12 @@ def test_delivery_gate_and_timezone_are_wired_into_daily_workflow():
     assert jobs["analyze"]["needs"] == "delivery_gate"
     assert jobs["analyze"]["if"] == "needs.delivery_gate.outputs.skip != 'true'"
     assert jobs["analyze"]["env"]["TZ"] == "Asia/Shanghai"
+    analysis = next(step for step in jobs["analyze"]["steps"] if step.get("name") == "执行股票分析")
+    command = analysis["run"]
+    preflight = command.index("python scripts/check_daily_trading_day.py")
+    assert command.index("export STOCK_LIST=\"$(cat reports/daily_stock_pool.txt)\"") < preflight
+    assert command.index("FORCE_RUN_ARG=\"--force-run\"") < preflight
+    assert preflight < command.index("python main.py")
+    assert 'if [ "$(cat reports/trading_day_skip.txt)" = "true" ]; then' in command
     upload = next(step for step in jobs["analyze"]["steps"] if step.get("name") == "上传接口接受回执")
     assert "delivery_date" in upload["if"] and "delivery_date" in upload["with"]["name"]

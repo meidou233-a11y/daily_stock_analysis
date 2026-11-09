@@ -596,6 +596,13 @@ jobs:
             echo "⚡ 已启用强制运行模式（跳过交易日检查）"
           fi
 
+          # 休市时同时跳过分析与通知，避免通知脚本因没有新报告而报错。
+          python scripts/check_daily_trading_day.py --mode "$MODE" $FORCE_RUN_ARG --output reports/trading_day_skip.txt
+          if [ "$(cat reports/trading_day_skip.txt)" = "true" ]; then
+            echo "今日所有相关市场休市，正常跳过分析与推送"
+            exit 0
+          fi
+
           # 两条日报先保存完整分析，再统一发送；避免旧通知重复。
           NOTIFY_ARGS=()
           if [ "$DAILY_NOTIFICATION_LAYOUT" = "two_part" ]; then
