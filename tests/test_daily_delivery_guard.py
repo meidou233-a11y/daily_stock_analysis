@@ -21,9 +21,9 @@ def test_manual_replay_bypasses_receipt_and_standard_has_no_backup_duplicates():
     def forbidden(date):
         raise AssertionError("Should not request artifacts")
     assert not guard.should_skip({"GITHUB_EVENT_NAME": "workflow_dispatch"}, forbidden, "20261013")
-    env = {"GITHUB_EVENT_NAME": "schedule", "DAILY_NOTIFICATION_LAYOUT": "standard", "TRIGGER_SCHEDULE": "37 11 * * 1-5"}
+    env = {"GITHUB_EVENT_NAME": "schedule", "DAILY_NOTIFICATION_LAYOUT": "standard", "TRIGGER_SCHEDULE": "37 11 * * *"}
     assert guard.should_skip(env, forbidden, "20261013")
-    env["TRIGGER_SCHEDULE"] = "7 10 * * 1-5"
+    env["TRIGGER_SCHEDULE"] = "7 10 * * *"
     assert not guard.should_skip(env, forbidden, "20261013")
 
 
@@ -66,6 +66,8 @@ def test_delivery_gate_and_timezone_are_wired_into_daily_workflow():
     from pathlib import Path
     import yaml
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/00-daily-analysis.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert [item["cron"] for item in triggers["schedule"]] == ["7 10 * * *", "37 11 * * *"]
     jobs = workflow["jobs"]
     assert jobs["analyze"]["needs"] == "delivery_gate"
     assert jobs["analyze"]["if"] == "needs.delivery_gate.outputs.skip != 'true'"
