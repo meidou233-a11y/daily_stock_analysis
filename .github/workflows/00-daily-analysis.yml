@@ -653,3 +653,15 @@ jobs:
             echo "📜 最近日志（最后 30 行）:"
             tail -30 logs/stock_analysis_*.log 2>/dev/null || echo "无日志"
           fi
+
+      - name: 心跳上报（静默失效监控）
+        # 排程被静默停用时不会产生任何 run，也就没有失败可供发现。
+        # 外部监控收不到心跳即告警。未配置 HEARTBEAT_URL 时该步骤为空操作。
+        if: always()
+        env:
+          # ping URL 内含密钥，故此处 Secrets 优先于 Variables（与本文件其他配置相反）。
+          HEARTBEAT_URL: ${{ secrets.HEARTBEAT_URL || vars.HEARTBEAT_URL }}
+          HEARTBEAT_STATUS: ${{ job.status }}
+          HEARTBEAT_DATE: ${{ steps.analysis.outputs.delivery_date }}
+          HEARTBEAT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python scripts/send_heartbeat.py
